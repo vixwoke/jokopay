@@ -6,7 +6,7 @@ import ChartCard, { ChartDataPoint } from "./ChartCard";
 
 interface RecentTx {
   id: string;
-  created_at: string;
+  date: string;
   type: "expense" | "income";
   store: string | null;
   payment_method: string | null;
@@ -49,9 +49,9 @@ export default function DashboardPanel({ refreshKey = 0 }: { refreshKey?: number
           .limit(transactionCount),
         supabase
           .from("transactions")
-          .select("id, created_at, type, store, payment_method, total, notes")
+          .select("id, date, type, store, payment_method, total, notes")
           .eq("user_id", userId)
-          .order("created_at", { ascending: false })
+          .order("date", { ascending: false })
           .limit(10),
         supabase
           .from("transactions")
@@ -257,7 +257,7 @@ export default function DashboardPanel({ refreshKey = 0 }: { refreshKey?: number
                         {tx.store || tx.type}
                       </span>
                       <p className="mt-0.5 truncate text-xs text-zinc-400">
-                        {formatTime(tx.created_at)}
+                        {formatTime(tx.date)}
                       </p>
                     </div>
                     <span
@@ -271,7 +271,7 @@ export default function DashboardPanel({ refreshKey = 0 }: { refreshKey?: number
                     {/* Hover tooltip */}
                     <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-white shadow-lg opacity-0 transition-opacity group-hover:opacity-100">
                       <p className="font-medium">{tx.store || tx.type}</p>
-                      <p className="mt-0.5 text-zinc-400">{formatTime(tx.created_at)}</p>
+                      <p className="mt-0.5 text-zinc-400">{formatTime(tx.date)}</p>
                       <hr className="my-1 border-zinc-700" />
                       <p>
                         Type: <span className="capitalize">{tx.type}</span>
