@@ -407,6 +407,78 @@ export default function TransactionsPage() {
     setImportMsg(null);
   }
 
+  async function handleExportCSV() {
+    if (transactions.length === 0) {
+      // Optionally, show a message? We'll just return.
+      return;
+    }
+
+    const csvRows = [];
+    csvRows.push('group,date,time,type,store,payment_method,total,notes,item_name,item_amount,item_quantity');
+
+    transactions.forEach(transaction => {
+      // Parse the date string to get date and time parts
+      let datePart = '';
+      let timePart = '00:00';
+      if (transaction.date && typeof transaction.date === 'string') {
+        const tParts = transaction.date.split('T');
+        if (tParts.length === 2) {
+          datePart = tParts[0];
+          const timeFull = tParts[1].split('.')[0]; // remove fractional seconds
+          timePart = timeFull.substring(0, 5); // HH:MM
+        } else {
+          // If there's no T, then the whole string is the date?
+          datePart = transaction.date;
+        }
+      } else {
+        // Fallback to today
+        const now = new Date();
+        datePart = now.toISOString().split('T')[0];
+        timePart = now.toISOString().split('T')[1].split('.')[0].substring(0, 5);
+      }
+
+      transaction.items.forEach(item => {
+        const row = [
+          transaction.id, // group
+          datePart,
+          timePart,
+          transaction.type,
+          transaction.store ?? '',
+          transaction.payment_method ?? '',
+          transaction.total,
+          transaction.notes ?? '',
+          item.name,
+          item.amount,
+          item.quantity
+        ];
+
+        // Escape each field: if it contains a comma, double quote, or newline, we wrap in double quotes and escape double quotes.
+        const escapedRow = row.map(field => {
+          const str = String(field);
+          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        });
+
+        csvRows.push(escapedRow.join(','));
+      });
+    });
+
+    const csvString = csvRows.join('\n');
+
+    // Trigger download
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'transactions.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   function handleDownloadSample() {
     const csv = `group,date,time,type,store,payment_method,total,notes,item_name,item_amount,item_quantity
 1,2026-05-19,14:30,expense,Giant,TNG,150.50,weekly groceries,Milk,12.00,2
@@ -475,6 +547,7 @@ export default function TransactionsPage() {
               Import CSV
             </button>
             <button
+              onClick={handleExportCSV}
               className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
