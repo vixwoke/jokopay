@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --brand: #00a884;
+  --brand-light: #d9fdd3;
+  --brand-dark: #005c4b;
+  --chat-bg: #efeae2;
+  --chat-bg-dark: #0b141a;
+  --bubble-user: #d9fdd3;
+  --bubble-user-dark: #005c4b;
+  --bubble-other: #ffffff;
+  --bubble-other-dark: #202c33;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-geist-mono);
+  --font-brand: var(--font-pacifico);
+  --color-brand: var(--brand);
+  --color-brand-light: var(--brand-light);
+  --color-brand-dark: var(--brand-dark);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #111b21;
+    --foreground: #e9edef;
+    --chat-bg: var(--chat-bg-dark);
+    --bubble-user: var(--bubble-user-dark);
+    --bubble-other: var(--bubble-other-dark);
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+label {
+  cursor: pointer;
+}
+
+@keyframes edit-blink {
+  0%, 100% { border-color: rgba(251, 146, 60, 0.25); }
+  50% { border-color: rgba(251, 146, 60, 1); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+@keyframes flash-sweep {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes dialog-enter {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes auth-fade-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes auth-float {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(12px, -10px, 0) rotate(1deg); }
+}
+
+@keyframes login-fade-out {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes route-fade-in {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.dialog-enter {
+  animation: dialog-enter 0.2s ease-out;
+}
+
+.auth-fade-in {
+  animation: auth-fade-in 0.55s ease-out both;
+}
+
+.auth-float {
+  animation: auth-float 12s ease-in-out infinite;
+}
+
+.login-fade-out {
+  animation: login-fade-out 1s ease-in-out forwards;
+}
+
+.route-fade-in {
+  animation: route-fade-in 1s ease-in-out forwards;
+}
+
+.editable-border {
+  border-color: rgb(251 146 60);
+}
+
+.editable-border:hover {
+  animation: edit-blink 1.5s ease-in-out infinite;
+}
