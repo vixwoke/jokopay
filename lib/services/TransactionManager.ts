@@ -41,6 +41,7 @@ export class TransactionManager {
   ): Promise<boolean> {
     const userId = getUserId();
     if (!userId) return false;
+    const transactionDate = data.date || new Date().toISOString();
 
     const { data: transaction, error: txError } = await supabase
       .from("transactions")
@@ -51,7 +52,7 @@ export class TransactionManager {
         payment_method: data.payment_method,
         total: data.total,
         notes: data.notes,
-        date: data.date || new Date().toISOString(),
+        date: transactionDate,
         raw_text: rawText,
         source,
       })
@@ -72,7 +73,7 @@ export class TransactionManager {
           amount: item.amount,
           quantity: item.quantity,
           category: item.category,
-          created_at: data.date || new Date().toISOString(),
+          created_at: transactionDate,
         });
 
       if (itemError) {

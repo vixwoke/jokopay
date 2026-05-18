@@ -13,6 +13,10 @@ type Phase = "idle" | "processing" | "receipt" | "missing_fields" | "saved" | "e
 const parser = new TransactionParser();
 const txManager = new TransactionManager();
 
+function optionalDateTimeMissingFields(fields: string[] | undefined): string[] {
+  return (fields || []).filter((field) => field !== "date" && field !== "time");
+}
+
 export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: () => void }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [procText, setProcText] = useState("");
@@ -131,6 +135,7 @@ export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: 
         return;
       }
       d.date = d.date || new Date().toISOString();
+      d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
       if (d.type === "income" && d.missing_fields) {
         d.missing_fields = d.missing_fields.filter((f) => f !== "store");
       }
@@ -232,6 +237,7 @@ export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: 
         return;
       }
       d.date = d.date || new Date().toISOString();
+      d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
       if (d.type === "income" && d.missing_fields) {
         d.missing_fields = d.missing_fields.filter((f) => f !== "store");
       }

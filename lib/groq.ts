@@ -21,6 +21,17 @@ RULES:
    Malay words (beli=buy, bayar=pay, guna=use, gaji=salary, duit=money, kedai=store) 
    and Indonesian words (beli=buy, bayar=pay, pakai=use, uang=money, warung=store).
    But always output text in English.
+5. Extract transaction date and time when mentioned. Use Malaysia time
+   (Asia/Kuala_Lumpur, UTC+08:00) for relative phrases such as today,
+   yesterday, this morning, last night, and tomorrow.
+6. The "date" field must be a full ISO-8601 timestamp string with a timezone
+   offset, for example "2026-05-19T14:30:00+08:00".
+7. The "time" field must be "HH:mm" in 24-hour Malaysia time when the user
+   gave or implied a time. If date is known but time is not mentioned, use
+   the current Malaysia time. If neither date nor time is mentioned, set both
+   "date" and "time" to null.
+8. Do not add "date" or "time" to missing_fields. They are optional and the
+   app will default them if the user does not mention them.
 
 Extract this JSON (no markdown, no explanation, only valid JSON):
 {
@@ -29,12 +40,34 @@ Extract this JSON (no markdown, no explanation, only valid JSON):
     "payment_method": string | null,
   "total": number | null,
   "notes": string | null,
+  "date": string | null,
+  "time": string | null,
   "items": [{ "name": string, "amount": number, "quantity": number, "category": string | null }],
   "missing_fields": ["list of field names the user didn't provide"],
   "error": string | null
 }`;
 
+function getMalaysiaDateTimeContext(): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kuala_Lumpur",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+  const malaysiaLocal = `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
+
+  return `Current Malaysia date/time: ${malaysiaLocal}. Timezone: Asia/Kuala_Lumpur (UTC+08:00).`;
+}
+
 async function groqParse(userText: string, previousData?: string): Promise<string> {
+  const dateTimeContext = getMalaysiaDateTimeContext();
   const messages: { role: "system" | "user"; content: string }[] = [
     { role: "system", content: SYSTEM_PROMPT },
   ];
@@ -42,10 +75,10 @@ async function groqParse(userText: string, previousData?: string): Promise<strin
   if (previousData) {
     messages.push({
       role: "user",
-      content: `Previous partial data: ${previousData}\nUser just said: "${userText}"\nProduce updated JSON merging both.`,
+      content: `${dateTimeContext}\nPrevious partial data: ${previousData}\nUser just said: "${userText}"\nProduce updated JSON merging both. Preserve any existing date/time unless the user corrects it.`,
     });
   } else {
-    messages.push({ role: "user", content: userText });
+    messages.push({ role: "user", content: `${dateTimeContext}\nUser text: "${userText}"` });
   }
 
   const completion = await groq.chat.completions.create({

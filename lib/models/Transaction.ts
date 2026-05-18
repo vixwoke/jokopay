@@ -12,6 +12,7 @@ export interface TransactionData {
   total: number | null;
   notes: string | null;
   date: string | null;
+  time?: string | null;
   items: TransactionItem[];
   missing_fields: string[];
   error: string | null;
