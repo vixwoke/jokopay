@@ -109,7 +109,7 @@ function tryExtractJson(raw: string): TransactionData | null {
 }
 
 export class TransactionParser {
-  private previousData: string | null = null;
+  public previousData: string | null = null;
 
   reset() {
     this.previousData = null;
