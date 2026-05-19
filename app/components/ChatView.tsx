@@ -17,6 +17,25 @@ function optionalDateTimeMissingFields(fields: string[] | undefined): string[] {
   return (fields || []).filter((field) => field !== "date" && field !== "time");
 }
 
+function tryExtractJson(raw: string): any {
+  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    // try to find a JSON object anywhere in the string
+    const match = stripped.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: () => void }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [procText, setProcText] = useState("");
@@ -122,29 +141,43 @@ export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: 
     try {
       const { data: d } = await parser.parse(text);
 
-      if (!d) {
-        setPhase("error");
-        setErrMsg("Could not parse that as a transaction. Try being more specific.");
-        busy.current = false;
-        return;
-      }
-      if (d.error) {
-        setPhase("error");
-        setErrMsg(d.error);
-        busy.current = false;
-        return;
-      }
-      d.date = d.date || new Date().toISOString();
-      d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
-      if (d.type === "income" && d.missing_fields) {
-        d.missing_fields = d.missing_fields.filter((f) => f !== "store");
-      }
-      if (d.missing_fields?.length) {
-        setPhase("missing_fields");
-        setData(d);
-        busy.current = false;
-        return;
-      }
+       if (!d) {
+         setPhase("error");
+         setErrMsg("Could not parse that as a transaction. Try being more specific.");
+         busy.current = false;
+         return;
+       }
+       if (d.error) {
+         setPhase("error");
+         setErrMsg(d.error);
+         busy.current = false;
+         return;
+       }
+       // Get current Malaysia time as ISO string with offset for default date
+       const now = new Date();
+       const parts = new Intl.DateTimeFormat("en-CA", {
+         timeZone: "Asia/Kuala_Lumpur",
+         year: "numeric",
+         month: "2-digit",
+         day: "2-digit",
+         hour: "2-digit",
+         minute: "2-digit",
+         second: "2-digit",
+         hour12: false,
+         hourCycle: "h23",
+       }).formatToParts(now);
+       const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+       d.date = d.date || `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
+       d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
+       if (d.type === "income" && d.missing_fields) {
+         d.missing_fields = d.missing_fields.filter((f) => f !== "store");
+       }
+       if (d.missing_fields?.length) {
+         setPhase("missing_fields");
+         setData(d);
+         busy.current = false;
+         return;
+       }
       if (d.total !== null && d.type) {
         setPhase("receipt");
         setData(d);
@@ -215,38 +248,69 @@ export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: 
     }
   }
 
-  async function handleMissingSubmit(text: string) {
-    if (busy.current) return;
-    busy.current = true;
-    setPhase("processing");
-    setMissingInput("");
+async function handleMissingSubmit(text: string) {
+  if (busy.current) return;
+  busy.current = true;
+  setPhase("processing");
+  setMissingInput("");
 
-    try {
-      const { data: d } = await parser.parse(text.trim());
+  // Store previous data before it gets overwritten by the parse call
+  const prevJson = parser.previousData;
 
-      if (!d) {
-        setPhase("error");
-        setErrMsg("Could not parse that. Try again.");
-        busy.current = false;
-        return;
+  try {
+    const { data: d } = await parser.parse(text.trim());
+
+    if (!d) {
+      setPhase("error");
+      setErrMsg("Could not parse that. Try again.");
+      busy.current = false;
+      return;
+    }
+    if (d.error) {
+      setPhase("error");
+      setErrMsg(d.error);
+      busy.current = false;
+      return;
+    }
+    
+    // Recover date and time from previous parse if missing in current response
+    if ((!d.date || !d.date.trim()) && prevJson) {
+      const prevData = tryExtractJson(prevJson);
+      if (prevData && prevData.date) {
+        d.date = d.date || prevData.date;
       }
-      if (d.error) {
-        setPhase("error");
-        setErrMsg(d.error);
-        busy.current = false;
-        return;
+    }
+    if ((!d.time || !d.time.trim()) && prevJson) {
+      const prevData = tryExtractJson(prevJson);
+      if (prevData && prevData.time) {
+        d.time = d.time || prevData.time;
       }
-      d.date = d.date || new Date().toISOString();
-      d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
-      if (d.type === "income" && d.missing_fields) {
-        d.missing_fields = d.missing_fields.filter((f) => f !== "store");
-      }
-      if (d.missing_fields?.length) {
-        setPhase("missing_fields");
-        setData(d);
-        busy.current = false;
-        return;
-      }
+    }
+    
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kuala_Lumpur",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+    d.date = d.date || `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
+    d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
+    if (d.type === "income" && d.missing_fields) {
+      d.missing_fields = d.missing_fields.filter((f) => f !== "store");
+    }
+    if (d.missing_fields?.length) {
+      setPhase("missing_fields");
+      setData(d);
+      busy.current = false;
+      return;
+    }
       if (d.total !== null && d.type) {
         setPhase("receipt");
         setData(d);

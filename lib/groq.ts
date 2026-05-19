@@ -75,7 +75,7 @@ async function groqParse(userText: string, previousData?: string): Promise<strin
   if (previousData) {
     messages.push({
       role: "user",
-      content: `${dateTimeContext}\nPrevious partial data: ${previousData}\nUser just said: "${userText}"\nProduce updated JSON merging both. Preserve any existing date/time unless the user corrects it.`,
+      content: `${dateTimeContext}\nPrevious partial data: ${previousData}\nUser just said: "${userText}"\nProduce updated JSON merging both. Copy the "date" and "time" fields from previous data verbatim. Do NOT change them unless the user explicitly corrects them.`,
     });
   } else {
     messages.push({ role: "user", content: `${dateTimeContext}\nUser text: "${userText}"` });

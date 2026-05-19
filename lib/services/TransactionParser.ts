@@ -81,10 +81,11 @@ function normalizeDateTime(data: ParsedTransactionData): TransactionData {
   }
 
   const malaysia = malaysiaDateParts(parsedDate);
+  const time = explicitTime || malaysia.time;
   return {
     ...data,
-    date: parsedDate.toISOString(),
-    time: explicitTime || malaysia.time,
+    date: `${malaysia.date}T${time}:00+08:00`,
+    time,
   };
 }
 
