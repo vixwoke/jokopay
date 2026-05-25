@@ -1,6 +1,8 @@
-import Groq from "groq-sdk";
+import { getMalaysiaDateTimeContext as _getMalaysiaDateTimeContext } from "@/lib/utils/malaysiaTime";
 
-const groq = new Groq({ apiKey: process.env.NEXT_PUBLIC_GROQ_API_KEY,dangerouslyAllowBrowser: true });
+function getMalaysiaDateTimeContext(): string {
+  return _getMalaysiaDateTimeContext();
+}
 
 const SYSTEM_PROMPT = `You are JokoPay, a financial transaction parser for Malaysia. 
 Your role is to extract structured data from user input.
@@ -47,23 +49,23 @@ Extract this JSON (no markdown, no explanation, only valid JSON):
   "error": string | null
 }`;
 
-function getMalaysiaDateTimeContext(): string {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kuala_Lumpur",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
-  const malaysiaLocal = `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
-
-  return `Current Malaysia date/time: ${malaysiaLocal}. Timezone: Asia/Kuala_Lumpur (UTC+08:00).`;
+async function apiChat(
+  messages: { role: string; content: string }[],
+  options?: { temperature?: number; max_tokens?: number; top_p?: number }
+): Promise<string> {
+  const res = await fetch("/api/groq", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      temperature: options?.temperature ?? 0.1,
+      max_tokens: options?.max_tokens ?? 1024,
+      top_p: options?.top_p ?? 1,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Groq API request failed");
+  return data.content || "";
 }
 
 async function groqParse(userText: string, previousData?: string): Promise<string> {
@@ -81,16 +83,7 @@ async function groqParse(userText: string, previousData?: string): Promise<strin
     messages.push({ role: "user", content: `${dateTimeContext}\nUser text: "${userText}"` });
   }
 
-  const completion = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages,
-    temperature: 0.1,
-    max_completion_tokens: 1024,
-    top_p: 1,
-    stream: false,
-  });
-
-  return completion.choices[0]?.message?.content || "";
+  return apiChat(messages);
 }
 
 function stripMarkdown(raw: string): string {
@@ -112,40 +105,26 @@ export async function parseText(
 export async function speechToText(audioBlob: Blob): Promise<string> {
   const ext = audioBlob.type.includes("mp4") ? "m4a" : "webm";
   const file = new File([audioBlob], `audio.${ext}`, { type: audioBlob.type });
-  const transcription = await groq.audio.transcriptions.create({
-    file,
-    model: "whisper-large-v3",
-    language: "en",
-  });
-
-  return transcription.text || "";
+  const formData = new FormData();
+  formData.append("audio", file);
+  const res = await fetch("/api/groq", { method: "POST", body: formData });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Groq API request failed");
+  return data.text || "";
 }
 
 export async function ocrImage(imageBase64: string): Promise<string> {
-  const result = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Extract all text from this receipt/image. List every item, amount, store name, total, and payment method if visible. Output in English only. Return as plain text only.",
-          },
-          {
-            type: "image_url",
-            image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
-          },
-        ],
-      },
-    ],
-    temperature: 0.1,
-    max_completion_tokens: 1024,
-    top_p: 1,
-    stream: false,
+  const res = await fetch("/api/groq", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      image: imageBase64,
+      messages: [{ role: "user", content: "Extract all text from this receipt/image. List every item, amount, store name, total, and payment method if visible. Output in English only. Return as plain text only." }],
+    }),
   });
-
-  return result.choices[0]?.message?.content || "";
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Groq API request failed");
+  return data.content || "";
 }
 
 export async function normalizeEditInput(
@@ -177,19 +156,15 @@ Extract ONLY the normalized value for the "${field}" field from the raw input.
 
 Output ONLY the normalized value, no explanation, no JSON wrapping, no markdown.`;
 
-  const completion = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages: [
+  const content = await apiChat(
+    [
       { role: "system", content: "You normalize Malaysia finance transaction fields. Output only the normalized value, no extra text." },
       { role: "user", content: prompt },
     ],
-    temperature: 0.1,
-    max_completion_tokens: 256,
-    top_p: 1,
-    stream: false,
-  });
+    { max_tokens: 256 }
+  );
 
-  const normalized = (completion.choices[0]?.message?.content || rawInput).trim();
+  const normalized = (content || rawInput).trim();
   const changed = normalized.toLowerCase() !== rawInput.toLowerCase().trim();
   return { normalized, changed };
 }
@@ -217,19 +192,14 @@ Extract the item name, quantity, and amount from what the user said.
 Output ONLY valid JSON in this exact format, no other text:
 {"name": "...", "qty": 0, "amount": 0}`;
 
-  const completion = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
-    messages: [
+  const content = await apiChat(
+    [
       { role: "system", content: "You extract item name, quantity, and amount from voice input for a Malaysia finance tracker. Output only JSON." },
       { role: "user", content: prompt },
     ],
-    temperature: 0.1,
-    max_completion_tokens: 256,
-    top_p: 1,
-    stream: false,
-  });
+    { max_tokens: 256 }
+  );
 
-  const content = (completion.choices[0]?.message?.content || "").trim();
   try {
     const parsed = JSON.parse(content);
     return {

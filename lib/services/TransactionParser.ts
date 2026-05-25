@@ -6,23 +6,10 @@ type ParsedTransactionData = TransactionData & {
   time?: string | null;
 };
 
-function malaysiaDateParts(date: Date): { date: string; time: string } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kuala_Lumpur",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
+import { getMalaysiaDate, getMalaysiaTime } from "@/lib/utils/malaysiaTime";
 
-  return {
-    date: `${value("year")}-${value("month")}-${value("day")}`,
-    time: `${value("hour")}:${value("minute")}`,
-  };
+function malaysiaDateParts(date: Date): { date: string; time: string } {
+  return { date: getMalaysiaDate(date), time: getMalaysiaTime(date) };
 }
 
 function normalizeTime(raw: unknown): string | null {
@@ -89,7 +76,7 @@ function normalizeDateTime(data: ParsedTransactionData): TransactionData {
   };
 }
 
-function tryExtractJson(raw: string): TransactionData | null {
+export function tryExtractJson(raw: string): TransactionData | null {
   const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
   try {

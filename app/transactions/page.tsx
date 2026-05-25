@@ -43,6 +43,38 @@ interface PreviewGroup {
 
 const PAGE_SIZES = [10, 20, 50, 100, 1000] as const;
 
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        result.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+  }
+  result.push(current);
+  return result;
+}
+
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleString("en", {
@@ -71,6 +103,15 @@ export default function TransactionsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string; action?: "delete" | "confirm"; onConfirm: () => void } | null>(null);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editType, setEditType] = useState<"expense" | "income">("expense");
+  const [editStore, setEditStore] = useState("");
+  const [editPayment, setEditPayment] = useState("");
+  const [editTotal, setEditTotal] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   function handleOpenSettings() {
     setSidebarOpen(false);
@@ -256,7 +297,7 @@ export default function TransactionsPage() {
         return;
       }
 
-      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+      const headers = parseCSVLine(lines[0]).map((h) => h.trim().toLowerCase());
       const groupIdx = headers.indexOf("group");
       const dateIdx = headers.indexOf("date");
       const timeIdx = headers.indexOf("time");
@@ -277,7 +318,7 @@ export default function TransactionsPage() {
       const groups = new Map<string, PreviewGroup>();
 
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(",").map((c) => c.trim());
+        const cols = parseCSVLine(lines[i]).map((c) => c.trim());
         const type = cols[typeIdx]?.toLowerCase();
         if (type !== "expense" && type !== "income") continue;
 
@@ -286,7 +327,7 @@ export default function TransactionsPage() {
 
         const dateRaw = dateIdx !== -1 && cols[dateIdx] ? cols[dateIdx] : new Date().toISOString().split("T")[0];
         const timeRaw = timeIdx !== -1 && cols[timeIdx] ? cols[timeIdx] : "00:00";
-        const date = `${dateRaw}T${timeRaw}:00.000Z`;
+        const date = `${dateRaw}T${timeRaw}:00+08:00`;
         const store = storeIdx !== -1 ? cols[storeIdx] || null : null;
         const payment = paymentIdx !== -1 ? cols[paymentIdx] || null : null;
         const notes = notesIdx !== -1 ? cols[notesIdx] || null : null;
@@ -405,6 +446,65 @@ export default function TransactionsPage() {
     setPreviewData(null);
     setCsvFileName("");
     setImportMsg(null);
+  }
+
+  function handleEditTransaction(tx: Transaction) {
+    setEditingTx(tx);
+    const d = new Date(tx.date);
+    setEditDate(d.toISOString().slice(0, 10));
+    setEditTime(d.toTimeString().slice(0, 5));
+    setEditType(tx.type);
+    setEditStore(tx.store || "");
+    setEditPayment(tx.payment_method || "");
+    setEditTotal(String(tx.total));
+    setEditNotes(tx.notes || "");
+  }
+
+  async function handleSaveEdit() {
+    if (!editingTx) return;
+    const userId = localStorage.getItem("jokopay_user_id");
+    if (!userId) return;
+
+    setEditSaving(true);
+    const newDate = `${editDate}T${editTime}:00+08:00`;
+    const newTotal = parseFloat(editTotal) || 0;
+
+    const { error } = await supabase
+      .from("transactions")
+      .update({
+        type: editType,
+        store: editStore || null,
+        payment_method: editPayment || null,
+        total: newTotal,
+        notes: editNotes || null,
+        date: newDate,
+      })
+      .eq("id", editingTx.id)
+      .eq("user_id", userId);
+
+    if (!error) {
+      const delta = editType === "expense" ? -newTotal : newTotal;
+      const oldDelta = editingTx.type === "expense" ? -editingTx.total : editingTx.total;
+      const adjustment = delta - oldDelta;
+
+      if (adjustment !== 0) {
+        const { data: user } = await supabase
+          .from("users")
+          .select("balance")
+          .eq("id", userId)
+          .single();
+        if (user) {
+          await supabase
+            .from("users")
+            .update({ balance: Number(user.balance) + adjustment })
+            .eq("id", userId);
+        }
+      }
+    }
+
+    setEditSaving(false);
+    setEditingTx(null);
+    setRefreshKey((k) => k + 1);
   }
 
   async function handleExportCSV() {
@@ -691,7 +791,7 @@ export default function TransactionsPage() {
                       <td className="whitespace-nowrap px-2 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
-                            onClick={() => {}}
+                            onClick={() => handleEditTransaction(tx)}
                             className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
                             title="Edit"
                           >
@@ -965,6 +1065,75 @@ export default function TransactionsPage() {
         )}
 
         {/* Confirm Dialog */}
+        {/* Edit Transaction Dialog */}
+        {editingTx && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="dialog-enter mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl ring-1 ring-black/5 dark:bg-[#1f2c33] dark:ring-white/10">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">Edit Transaction</h2>
+                <button
+                  onClick={() => setEditingTx(null)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                    <path fillRule="evenodd" d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs font-medium text-zinc-500">Date</label>
+                    <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs font-medium text-zinc-500">Time</label>
+                    <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-500">Type</label>
+                  <select value={editType} onChange={(e) => setEditType(e.target.value as "expense" | "income")} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white">
+                    <option value="expense">Expense</option>
+                    <option value="income">Income</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-500">Store</label>
+                  <input type="text" value={editStore} onChange={(e) => setEditStore(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-500">Payment Method</label>
+                  <input type="text" value={editPayment} onChange={(e) => setEditPayment(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-500">Total (RM)</label>
+                  <input type="number" step="0.01" value={editTotal} onChange={(e) => setEditTotal(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-500">Notes</label>
+                  <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[var(--brand)] dark:border-zinc-600 dark:bg-[#2a3942] dark:text-white" />
+                </div>
+              </div>
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={() => setEditingTx(null)}
+                  className="flex-1 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={editSaving}
+                  className="flex-1 rounded-lg bg-[var(--brand)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-dark)] disabled:opacity-50"
+                >
+                  {editSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {confirmDialog && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="dialog-enter mx-4 w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl ring-1 ring-black/5 dark:bg-[#1f2c33] dark:ring-white/10">

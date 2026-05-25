@@ -2,11 +2,12 @@
 
 import { useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { TransactionParser } from "@/lib/services/TransactionParser";
+import { TransactionParser, tryExtractJson } from "@/lib/services/TransactionParser";
 import { TransactionManager } from "@/lib/services/TransactionManager";
 import { TransactionData, InputSource } from "@/lib/models/Transaction";
 import { ImageInputCollector, VoiceInputCollector } from "@/lib/services/InputCollector";
 import { ocrImage, normalizeEditInput, normalizeItemVoice } from "@/lib/groq";
+import { getMalaysiaISOString, getMalaysiaDate, getMalaysiaTime, getMalaysiaValue } from "@/lib/utils/malaysiaTime";
 
 type Phase = "idle" | "processing" | "receipt" | "missing_fields" | "saved" | "error";
 
@@ -15,25 +16,6 @@ const txManager = new TransactionManager();
 
 function optionalDateTimeMissingFields(fields: string[] | undefined): string[] {
   return (fields || []).filter((field) => field !== "date" && field !== "time");
-}
-
-function tryExtractJson(raw: string): any {
-  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  try {
-    return JSON.parse(stripped);
-  } catch {
-    // try to find a JSON object anywhere in the string
-    const match = stripped.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
 }
 
 export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: () => void }) {
@@ -153,21 +135,7 @@ export default function ChatView({ onTransactionSaved }: { onTransactionSaved?: 
          busy.current = false;
          return;
        }
-       // Get current Malaysia time as ISO string with offset for default date
-       const now = new Date();
-       const parts = new Intl.DateTimeFormat("en-CA", {
-         timeZone: "Asia/Kuala_Lumpur",
-         year: "numeric",
-         month: "2-digit",
-         day: "2-digit",
-         hour: "2-digit",
-         minute: "2-digit",
-         second: "2-digit",
-         hour12: false,
-         hourCycle: "h23",
-       }).formatToParts(now);
-       const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
-       d.date = d.date || `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
+       d.date = d.date || getMalaysiaISOString();
        d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
        if (d.type === "income" && d.missing_fields) {
          d.missing_fields = d.missing_fields.filter((f) => f !== "store");
@@ -287,20 +255,7 @@ async function handleMissingSubmit(text: string) {
       }
     }
     
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Kuala_Lumpur",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      hourCycle: "h23",
-    }).formatToParts(now);
-    const value = (type: string) => parts.find((part) => part.type === type)?.value || "00";
-    d.date = d.date || `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}+08:00`;
+    d.date = d.date || getMalaysiaISOString();
     d.missing_fields = optionalDateTimeMissingFields(d.missing_fields);
     if (d.type === "income" && d.missing_fields) {
       d.missing_fields = d.missing_fields.filter((f) => f !== "store");
@@ -393,12 +348,11 @@ async function handleMissingSubmit(text: string) {
     setEditInput("");
     if (field === "date" && data?.date) {
       const d = new Date(data.date);
-      setEditDate(d.toISOString().slice(0, 10));
-      setEditTime(d.toTimeString().slice(0, 5));
+      setEditDate(getMalaysiaDate(d));
+      setEditTime(getMalaysiaTime(d));
     } else if (field === "date") {
-      const d = new Date();
-      setEditDate(d.toISOString().slice(0, 10));
-      setEditTime(d.toTimeString().slice(0, 5));
+      setEditDate(getMalaysiaDate());
+      setEditTime(getMalaysiaTime());
     }
   }
 
@@ -628,14 +582,13 @@ async function handleMissingSubmit(text: string) {
   }
 
   function handleDateNow() {
-    const d = new Date();
-    setEditDate(d.toISOString().slice(0, 10));
-    setEditTime(d.toTimeString().slice(0, 5));
+    setEditDate(getMalaysiaDate());
+    setEditTime(getMalaysiaTime());
   }
 
   function handleDateApply() {
     if (!data) return;
-    const iso = `${editDate}T${editTime}:00.000Z`;
+    const iso = `${editDate}T${editTime}:00+08:00`;
     setData({ ...data, date: iso });
     setEditField(null);
     setEditDate("");
@@ -933,10 +886,11 @@ async function handleMissingSubmit(text: string) {
                           }
                         }}
                         onChange={(e) => {
-                          const digit = e.target.value.slice(-1);
-                          if (/^[0-9]$/.test(digit)) {
-                            setEditItemAmount((prev) => handleAmountKey(digit, prev));
-                          }
+                          const raw = e.target.value;
+                          const cleaned = raw.replace(/[^0-9.]/g, "");
+                          const parts = cleaned.split(".");
+                          const digits = parts[0].replace(/\D/g, "") + (parts.length > 1 ? "." + parts.slice(1).join("").replace(/\D/g, "").slice(0, 2) : "");
+                          setEditItemAmount(digits || "0");
                         }}
                         placeholder="0.00"
                         disabled={editLoading}
